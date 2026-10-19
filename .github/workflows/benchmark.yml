@@ -1,0 +1,55 @@
+# .github/workflows/benchmark.yml  (in astropy/astropy, on main)
+#
+# Runs asv on the self-hosted benchmark box when a maintainer applies the
+# `run-benchmarks` label. pull_request_target means THIS file comes from main,
+# so a PR cannot change the gate or the runner it targets.
+#
+# Org side: restrict the `benchmarks` runner group to exactly this workflow:
+#   astropy/astropy/.github/workflows/benchmark.yml@refs/heads/main
+name: Benchmarks
+
+on:
+  pull_request_target:
+    types: [labeled]
+
+permissions: {}
+
+jobs:
+  benchmark:
+    if: github.event.label.name == 'run-benchmarks'
+    runs-on: [self-hosted, benchmark]
+    timeout-minutes: 120
+    permissions:
+      contents: read
+    steps:
+      - name: Check out PR head (pinned SHA)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      - name: Show CPU isolation
+        run: |
+          echo "isolated: $(cat /sys/devices/system/cpu/isolated)"
+          echo "runner affinity: $(taskset -cp $$)"
+          echo "benchmark core: $BENCH_CPU"
+
+      - name: Warm up
+        run: taskset -c "$BENCH_CPU" asv run --quick --show-stderr HEAD^!
+
+      - name: Run benchmarks
+        run: taskset -c "$BENCH_CPU" asv run --interleave-rounds --show-stderr HEAD^!
+
+      - name: Compare against base
+        run: |
+          taskset -c "$BENCH_CPU" asv run --quick ${{ github.event.pull_request.base.sha }}^!
+          asv compare ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }} > compare.txt
+          cat compare.txt
+
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: |
+            compare.txt
+            .asv/results
