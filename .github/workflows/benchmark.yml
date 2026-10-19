@@ -3,9 +3,6 @@
 # Runs asv on the self-hosted benchmark box when a maintainer applies the
 # `run-benchmarks` label. pull_request_target means THIS file comes from main,
 # so a PR cannot change the gate or the runner it targets.
-#
-# Org side: restrict the `benchmarks` runner group to exactly this workflow:
-#   astropy/astropy/.github/workflows/benchmark.yml@refs/heads/main
 name: Benchmarks
 
 on:
