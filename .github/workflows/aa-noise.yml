@@ -36,8 +36,11 @@ jobs:
         include:
           - platform: hosted
             runner: ubuntu-latest
+          # Temporary stand-in until the self-hosted runner is set up; restore
+          # the commented-out line below to switch back.
           - platform: self-hosted
-            runner: [self-hosted, benchmark]
+            runner: ubuntu-latest
+            # runner: [self-hosted, benchmark]
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     permissions:
