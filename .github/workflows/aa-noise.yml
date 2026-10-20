@@ -1,0 +1,138 @@
+# Measures the noise in asv comparisons on GitHub-hosted runners and on the
+# self-hosted benchmark runner. Each job compares the checked-out commit with
+# an empty commit on top of it, so any change asv reports is a false positive.
+# The self-hosted jobs queue up behind the single runner and run back to back,
+# while the hosted ones run in parallel. The summary job collects all runs and
+# writes noise statistics to the workflow summary.
+name: A/A benchmark noise
+
+on:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      repeats:
+        description: Number of A/A runs per platform
+        default: "10"
+
+permissions: {}
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    outputs:
+      repeats: ${{ steps.repeats.outputs.repeats }}
+    steps:
+      - id: repeats
+        env:
+          REPEATS: ${{ inputs.repeats || '10' }}
+        run: echo "repeats=$(jq -nc --argjson n "$REPEATS" '[range(1; $n + 1)]')" >> "$GITHUB_OUTPUT"
+
+  aa:
+    needs: setup
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [hosted, self-hosted]
+        repeat: ${{ fromJSON(needs.setup.outputs.repeats) }}
+        include:
+          - platform: hosted
+            runner: ubuntu-latest
+          # Temporary stand-in until the self-hosted runner is set up; restore
+          # the commented-out line below to switch back.
+          - platform: self-hosted
+            runner: ubuntu-latest
+            # runner: [self-hosted, benchmark]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    env:
+      PLATFORM: ${{ matrix.platform }}
+      # Keep BLAS single-threaded so hosted (multi-core) and self-hosted
+      # (pinned to one core) run the same work.
+      OPENBLAS_NUM_THREADS: 1
+      OMP_NUM_THREADS: 1
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install asv
+        run: python -m pip install asv virtualenv
+
+      - name: Create empty commit and reset asv state
+        run: |
+          # The self-hosted workspace persists between jobs, so remove cached
+          # environments and earlier results to make each run independent.
+          rm -rf .asv
+          git -c user.name=aa -c user.email=aa@example.invalid commit --allow-empty -m "A/A no-op"
+          git rev-parse HEAD~1 HEAD > hashes.txt
+          asv machine --yes --machine "$PLATFORM"
+
+      - name: Show machine
+        run: |
+          nproc
+          lscpu | grep "Model name"
+          echo "isolated: $(cat /sys/devices/system/cpu/isolated 2>/dev/null)"
+          echo "benchmark core: ${BENCH_CPU:-not set}"
+
+      - name: Run benchmarks
+        run: |
+          echo "STARTED=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+          ${BENCH_CPU:+taskset -c "$BENCH_CPU"} asv run --interleave-rounds --record-samples \
+            --show-stderr --machine "$PLATFORM" HASHFILE:hashes.txt
+
+      - name: Compare
+        run: asv compare --split --machine "$PLATFORM" HEAD~1 HEAD | tee compare.txt
+
+      - name: Collect output
+        run: |
+          mkdir aa-run
+          cp -r .asv/results aa-run/results
+          cp compare.txt aa-run/
+          jq -n --arg platform "$PLATFORM" --argjson repeat ${{ matrix.repeat }} \
+            --arg base "$(git rev-parse HEAD~1)" --arg head "$(git rev-parse HEAD)" \
+            --arg started "$STARTED" --arg runner "$RUNNER_NAME" \
+            '$ARGS.named' > aa-run/meta.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aa-${{ matrix.platform }}-${{ matrix.repeat }}
+          path: aa-run
+
+  summary:
+    needs: aa
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install asv
+        run: python -m pip install asv
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: aa-*
+          path: runs
+
+      - name: Summarize
+        run: |
+          python scripts/aa_summary.py runs log_ratios.csv > summary.md
+          cat summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: summary
+          path: |
+            summary.md
+            log_ratios.csv
