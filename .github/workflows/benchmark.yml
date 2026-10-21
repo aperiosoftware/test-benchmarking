@@ -6,15 +6,13 @@
 name: Benchmarks
 
 on:
-  pull_request_target:
-    types: [labeled]
+  push:
   workflow_dispatch:
 
 permissions: {}
 
 jobs:
   benchmark:
-    if: github.event.label.name == 'run-benchmarks'
     runs-on: [self-hosted, benchmark]
     timeout-minutes: 120
     permissions:
