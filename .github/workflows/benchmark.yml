@@ -24,21 +24,15 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
 
-      - name: Show CPU isolation
-        run: |
-          echo "isolated: $(cat /sys/devices/system/cpu/isolated)"
-          echo "runner affinity: $(taskset -cp $$)"
-          echo "benchmark core: $BENCH_CPU"
-
       - name: Warm up
-        run: taskset -c "$BENCH_CPU" asv run --quick --show-stderr HEAD^!
+        run: asv run --quick --show-stderr HEAD^!
 
       - name: Run benchmarks
-        run: taskset -c "$BENCH_CPU" asv run --interleave-rounds --show-stderr HEAD^!
+        run: asv run --interleave-rounds --show-stderr HEAD^!
 
       - name: Compare against base
         run: |
-          taskset -c "$BENCH_CPU" asv run --quick ${{ github.event.pull_request.base.sha }}^!
+          asv run --quick ${{ github.event.pull_request.base.sha }}^!
           asv compare ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }} > compare.txt
           cat compare.txt
 
