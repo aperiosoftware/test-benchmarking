@@ -29,6 +29,9 @@ jobs:
       - name: Install dependencies
         run: pip install asv
 
+      - name: Machine config
+        run: asv machine --yes
+
       - name: Warm up
         run: asv run --quick --show-stderr HEAD^!
 
